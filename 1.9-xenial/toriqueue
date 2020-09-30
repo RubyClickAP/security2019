@@ -1,0 +1,102 @@
+#! /bin/bash
+
+### BEGIN INIT INFO
+# Provides:          Click-AP
+# Required-Start:    $all
+# Required-Stop:     $all
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Resque worker via init.d (assumes you have Ruby, and a plugin to allow wildcards in queue names)
+# Description:       starts YAKITORY-Queue using start-stop-daemon
+### END INIT INFO
+
+PROG="rake"
+NICE_NAME="resque"
+PROG_DIR="/opt/rubies/ruby-1.9.3-p547/bin"
+USER="docker"
+PATH=/opt/yakitory/:/opt/rubies/ruby-1.9.3-p547/bin:/opt/nginx/sbin:/sbin:/bin:/usr/sbin:/usr/bin
+QUEUE=videos,encodings,notifications
+PROG_PATH="/opt/yakitory/"
+PID_PATH="/opt/yakitory/log"
+
+RAILS_ENV="production"
+
+capitalize_first () {
+  string0="$@"
+  firstchar=${string0:0:1}
+  string1=${string0:1}
+  FirstChar=`echo "$firstchar" | tr a-z A-Z`
+  echo "$FirstChar$string1"  
+}
+
+toUpper() {
+echo $1 | tr  "[:lower:]" "[:upper:]"
+}
+
+#PROG_ARGS="environment resque:work QUEUE='*'"
+PROG_ARGS="resque:work QUEUE='videos,encodings,notifications'"
+PID_FILE="$PID_PATH/$NICE_NAME.pid"
+
+start() {
+    if [ -e "$PID_FILE" ]; then
+        echo "Error! Resque worker is currently running, or the pid file in $PID_PATH is stale!" 1>&2
+        exit 1
+    else
+        #su $USER -c "cd $PROG_PATH && $PROG_DIR/$PROG $PROG_ARGS 2>&1 > $PROG_PATH/log/workers.log &" &
+        sudo -H -u docker /bin/bash "cd $PROG_PATH && $PROG_DIR/$PROG $PROG_ARGS 2>&1 > $PROG_PATH/log/workers.log &" &
+
+        echo "Starting up resque worker"
+
+        while [[ $WORKER_PID == "" ]]
+        do
+          WORKER_PID=`ps -ef | grep "Waiting for" | grep -v grep | awk '{ print $2 }'`
+          echo -n "."
+          sleep 3
+        done
+
+        echo $WORKER_PID > "$PID_FILE"
+        echo ""
+        echo "Resque worker started with PID=$WORKER_PID."
+    fi
+}
+
+stop() {
+    if [ -e "$PID_FILE" ]; then
+        echo "PID_FILE ---> $PID_FILE"
+        pid=`cat "$PID_FILE"`
+        echo "PID ---> $pid"
+        kill $pid > /dev/null 2>&1  # not using -9 so as not to have output
+        sleep 3 # I should really check if the PID is still up here...
+        rm "$PID_FILE"
+
+        echo "Resque worker stopped, brah!"
+    else
+        echo "Error! Resque worker is not running! C'mon, brah!" 1>&2
+        exit 1
+    fi
+}
+
+#if [ "$(id -u)" != "0" ]; then
+#    echo "This script must be run as root, brah!" 1>&2
+#    exit 1
+#fi
+
+case "$1" in
+    start)
+        start
+        exit 0
+    ;;
+    stop)
+        stop
+        exit 0
+    ;;
+    reload|restart|force-reload)
+        stop
+        start
+        exit 0
+    ;;
+    **)
+        echo "Usage: $0 {start|stop|reload}" 1>&2
+        exit 1
+    ;;
+esac
